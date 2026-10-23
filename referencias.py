@@ -121,6 +121,10 @@ FAIXAS_COMPRA = [
 
 JANELA_TRADE_MS = 5_000  # morte "trocada" se o assassino morrer até 5 s depois
 
+# Coesão: morte "isolada" = aliado vivo mais próximo a mais de X metros
+LIMIAR_ISOLADO_M = 20
+DIST_MAX_VALIDA_M = 150  # acima disso a coordenada do JSON é considerada inválida
+
 
 def nome_agente(cid):
     if cid is None:

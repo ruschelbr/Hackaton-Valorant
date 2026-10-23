@@ -5,15 +5,17 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 
-#leitura
+#leitura 
 
 def carregar(caminho: Path):
+    """Devolve uma lista de documentos JSON contidos no arquivo."""
     abrir = gzip.open if caminho.suffix == ".gz" else open
     with abrir(caminho, "rt", encoding="utf-8") as f:
         texto = f.read()
     try:
         return [json.loads(texto)]
     except json.JSONDecodeError:
+        # JSON Lines: um JSON por linha
         return [json.loads(l) for l in texto.splitlines() if l.strip()]
 
 
@@ -24,13 +26,13 @@ def listar_arquivos(alvo: Path):
     return sorted(p for pad in padroes for p in alvo.rglob(pad))
 
 
-#schema
+#schema 
 
 class Schema:
     def __init__(self, max_exemplos=3, max_itens=500):
         self.info = defaultdict(lambda: {"tipos": Counter(), "n": 0, "exemplos": [], "tamanhos": []})
         self.max_exemplos = max_exemplos
-        self.max_itens = max_itens  # limita itens visitados por lista
+        self.max_itens = max_itens  # limita itens visitados por lista (velocidade)
 
     def visitar(self, valor, caminho="$"):
         d = self.info[caminho]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import pickle
 import re
 from dataclasses import dataclass, field
@@ -12,7 +13,7 @@ import pandas as pd
 
 import referencias as ref
 
-VERSAO_CACHE = 4  # aumentar quando mudar o formato das tabelas
+VERSAO_CACHE = 5  # aumente quando mudar o formato das tabelas
 PASTA_CACHE = Path(__file__).resolve().parent / ".cache"
 
 # RUSH2_030a_21-06-26_azure_bears_golden_13_x_9_ufmt_turuna_fracture.json
@@ -199,6 +200,14 @@ def _ler_partida(caminho: Path, raiz: Path, avisos: list):
             vmx, vmy = _minimapa(mapa, vx, vy)
             kmx, kmy = _minimapa(mapa, kx, ky)
             jk, jv = jog.get(kil, {}), jog.get(vit, {})
+            # coesão: aliados da vítima vivos no momento e distância até o mais próximo
+            # (playerLocations traz todos os vivos menos a vítima; unidades do jogo = cm)
+            dists = [math.dist((vx, vy), (pl["location"]["x"], pl["location"]["y"])) / 100
+                     for pl in (k.get("playerLocations") or [])
+                     if pl["puuid"] != vit and jog.get(pl["puuid"], {}).get("team_id") == jv.get("team_id")]
+            dist_aliado = min(dists) if dists else None
+            if dist_aliado is not None and dist_aliado > ref.DIST_MAX_VALIDA_M:
+                dist_aliado = None  # coordenada inválida no JSON
             kills_linhas.append({
                 "match_id": mid, "mapa": mapa, "round": rn + 1,
                 "tempo_round_s": k["timeSinceRoundStartMillis"] / 1000,
@@ -212,6 +221,9 @@ def _ler_partida(caminho: Path, raiz: Path, avisos: list):
                 "primeiro_abate": k is primeiro,
                 "trade": kill_trade[i],
                 "fogo_amigo": bool(jk) and bool(jv) and jk["team_id"] == jv["team_id"],
+                "vitima_trocada": vit in trocados,
+                "aliados_vivos": len(dists),
+                "dist_aliado_m": None if dist_aliado is None else round(dist_aliado, 1),
                 "vitima_x": vx, "vitima_y": vy, "killer_x": kx, "killer_y": ky,
                 "vitima_mx": vmx, "vitima_my": vmy, "killer_mx": kmx, "killer_my": kmy,
             })
@@ -278,7 +290,7 @@ def _ler_partida(caminho: Path, raiz: Path, avisos: list):
             "n_abates": len(ks),
         })
 
-    # --- jogador x partida (estatísticas oficiais + derivadas dos rounds)
+    #  jogador x partida (estatísticas oficiais + derivadas dos rounds)
     jog_linhas = []
     for pid, j in jog.items():
         s = j["stats"]
@@ -295,7 +307,7 @@ def _ler_partida(caminho: Path, raiz: Path, avisos: list):
     return partida, times, rounds, jog_linhas, jr_linhas, kills_linhas, dano_linhas
 
 
-# ---------------------------------------------------------------- base completa
+#base completa
 
 def _assinatura(arquivos):
     h = hashlib.sha1(str(VERSAO_CACHE).encode())
@@ -306,7 +318,6 @@ def _assinatura(arquivos):
 
 
 def carregar_base(alvo, usar_cache=True, progresso=None) -> Base:
-    """Lê um arquivo ou uma pasta (recursivamente) de JSONs e monta as tabelas."""
     alvo = Path(alvo)
     arquivos = _listar_jsons(alvo)
     if not arquivos:
@@ -324,7 +335,7 @@ def carregar_base(alvo, usar_cache=True, progresso=None) -> Base:
     for i, arq in enumerate(arquivos):
         try:
             res = _ler_partida(arq, raiz, avisos)
-        except Exception as e:  # um arquivo quebrado não derruba o resto
+        except Exception as e: 
             avisos.append(f"{arq.name}: erro ao ler ({type(e).__name__}: {e})")
             continue
         if res[0]["match_id"] in vistos:
@@ -339,14 +350,12 @@ def carregar_base(alvo, usar_cache=True, progresso=None) -> Base:
 
     partidas, times, rounds, jogadores, jr, kills, dano = (pd.DataFrame(x) for x in acum)
 
-    # nome "oficial" de cada jogador = o nick mais usado (nicks mudam entre partidas)
     nick = jogadores.groupby("puuid")["nome"].agg(lambda s: s.value_counts().index[0])
     for df in (jogadores, jr):
         df["nome"] = df["puuid"].map(nick)
     kills["killer_nome"] = kills["killer"].map(nick)
     kills["vitima_nome"] = kills["vitima"].map(nick)
 
-    # métricas por partida derivadas dos rounds
     agg = jr.groupby(["match_id", "puuid"]).agg(
         dano=("dano", "sum"), headshots=("headshots", "sum"), bodyshots=("bodyshots", "sum"),
         legshots=("legshots", "sum"), kast_rounds=("kast", "sum"),
@@ -388,7 +397,7 @@ def _metricas(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# resumos prontos
+# ---------------------------------------------------------------- resumos prontos
 
 def resumo_jogadores(jogadores: pd.DataFrame, min_rounds=0) -> pd.DataFrame:
     """Agrega a tabela `jogadores` (já filtrada) em 1 linha por jogador."""
@@ -439,7 +448,7 @@ def resumo_times(base: Base, match_ids=None) -> pd.DataFrame:
     return res.round(1).sort_values(["win_pct", "rounds_pct"], ascending=False).reset_index()
 
 
-#  terminal
+#terminal
 
 def main():
     ap = argparse.ArgumentParser(description="Trata os JSONs de partidas de VALORANT.")
